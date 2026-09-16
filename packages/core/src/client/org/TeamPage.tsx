@@ -104,6 +104,7 @@ import {
   useOrg,
   useOrgMembers,
   useOrgInvitations,
+  useResendInvitation,
   useCreateOrg,
   useUpdateOrg,
   useBulkInviteMembers,
@@ -1336,7 +1337,11 @@ export function MembersTableCard({
               />
             ))}
             {visiblePendingInvites.map((inv) => (
-              <PendingInviteRow key={inv.id} invite={inv} />
+              <PendingInviteRow
+                key={inv.id}
+                invite={inv}
+                canResend={canInvite}
+              />
             ))}
           </>
         )}
@@ -1554,8 +1559,15 @@ function memberInitials(email: string): string {
   return initials || "?";
 }
 
-function PendingInviteRow({ invite }: { invite: PendingInviteListItem }) {
+export function PendingInviteRow({
+  invite,
+  canResend,
+}: {
+  invite: PendingInviteListItem;
+  canResend: boolean;
+}) {
   const t = useT();
+  const resend = useResendInvitation();
   return (
     <div className="flex flex-col gap-3 px-5 py-3.5 opacity-70 sm:flex-row sm:items-center">
       <div className="flex min-w-0 flex-1 items-center gap-3">
@@ -1569,6 +1581,28 @@ function PendingInviteRow({ invite }: { invite: PendingInviteListItem }) {
         <span className="rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground">
           {t("org.invited")}
         </span>
+        {canResend && (
+          <Button
+            type="button"
+            disabled={resend.isPending || resend.isSuccess}
+            onClick={() => resend.mutate(invite.email)}
+            className="px-2 py-1 text-xs"
+          >
+            {resend.isPending ? (
+              <IconLoader2 size={14} className="animate-spin" />
+            ) : null}
+            {t(
+              resend.isSuccess
+                ? "org.invitationResent"
+                : "org.resendInvitation",
+            )}
+          </Button>
+        )}
+        {resend.isError && (
+          <span role="alert" className="text-xs text-destructive">
+            {t("org.invitationResendFailed")}
+          </span>
+        )}
       </div>
     </div>
   );

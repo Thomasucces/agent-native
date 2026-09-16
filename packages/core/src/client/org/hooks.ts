@@ -162,6 +162,16 @@ export interface InviteVars {
   role?: InviteRole;
 }
 
+export function useResendInvitation() {
+  return useMutation({
+    mutationFn: (email: string) =>
+      apiFetch(`${ORG_BASE}/invitations`, {
+        method: "POST",
+        body: JSON.stringify({ email, resend: true }),
+      }),
+  });
+}
+
 export function useInviteMember() {
   const qc = useQueryClient();
   return useMutation({

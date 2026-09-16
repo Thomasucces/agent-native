@@ -1,4 +1,8 @@
 const messages = {
+  "org.resendInvitation": "Resend invitation",
+  "org.invitationResent": "Email sent",
+  "org.invitationResendFailed":
+    "Could not send. Check email settings and retry.",
   "approval.alwaysAllow": "Always allow",
   "approval.alwaysAllowHint": "Approve and always allow this exact command",
   "approval.alwaysAllowAction": "Always allow this action",

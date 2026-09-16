@@ -566,6 +566,7 @@ async function inviteOne(
   rawEmail: string,
   role: "member" | "admin",
   event: H3Event,
+  resend = false,
 ): Promise<SingleInviteResult> {
   const email = rawEmail.trim().toLowerCase();
   if (!email) {
@@ -592,25 +593,43 @@ async function inviteOne(
   }
 
   const existingInvite = await e.execute({
-    sql: `SELECT 1 FROM org_invitations WHERE org_id = ? AND LOWER(email) = ? AND status = 'pending' LIMIT 1`,
+    sql: `SELECT id, role FROM org_invitations WHERE org_id = ? AND LOWER(email) = ? AND status = 'pending' LIMIT 1`,
     args: [ctx.orgId, email],
   });
-  if (existingInvite.rows.length > 0) {
+  const pending = existingInvite.rows[0];
+  if (pending && !resend) {
     throw createError({
       statusCode: 409,
       message: `An invitation is already pending for ${email}`,
     });
   }
 
-  const id = nanoid();
-  await e.execute({
-    sql: `INSERT INTO org_invitations (id, org_id, email, invited_by, created_at, status, role) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
-    args: [id, ctx.orgId, email, ctx.email, Date.now(), role],
-  });
+  if (resend && !pending) {
+    throw createError({
+      statusCode: 404,
+      message: "Pending invitation not found",
+    });
+  }
+  const emailConfigured = await isEmailConfigured();
+  if (resend && !emailConfigured) {
+    throw createError({
+      statusCode: 503,
+      message: "Configure email before resending invitations",
+    });
+  }
+  const id = pending ? String(pending.id) : nanoid();
+  if (resend) {
+    role = normalizeInviteRole(pending!.role);
+  } else {
+    await e.execute({
+      sql: `INSERT INTO org_invitations (id, org_id, email, invited_by, created_at, status, role) VALUES (?, ?, ?, ?, ?, 'pending', ?)`,
+      args: [id, ctx.orgId, email, ctx.email, Date.now(), role],
+    });
+  }
 
   let emailSent = false;
   let emailError: string | undefined;
-  if (await isEmailConfigured()) {
+  if (emailConfigured) {
     try {
       const { subject, html, text } = renderInviteEmail({
         invitee: email,
@@ -630,6 +649,12 @@ async function inviteOne(
     } catch (err) {
       emailError = err instanceof Error ? err.message : String(err);
       console.error("[org/invitations] failed to send invite email", err);
+      if (resend) {
+        throw createError({
+          statusCode: 502,
+          message: "Invitation email could not be sent",
+        });
+      }
     }
   }
 
@@ -683,6 +708,7 @@ export const createInvitationHandler = defineEventHandler(
             inv.email,
             normalizeInviteRole(inv.role),
             event,
+            body?.resend === true,
           );
           succeeded.push(result);
         } catch (err) {
@@ -705,6 +731,7 @@ export const createInvitationHandler = defineEventHandler(
       body?.email ?? "",
       role,
       event,
+      body?.resend === true,
     );
     return result;
   },

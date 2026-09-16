@@ -73,8 +73,10 @@ vi.mock("../settings/user-settings.js", () => ({
   putUserSetting: vi.fn(),
 }));
 
+import { isEmailConfigured, sendEmail } from "../server/email.js";
 import { putUserSetting } from "../settings/user-settings.js";
 import {
+  createInvitationHandler,
   listMembersHandler,
   deleteOrgHandler,
   changeMemberRoleHandler,
@@ -110,6 +112,130 @@ describe("org handlers", () => {
     mockRevokeFederatedOrganizationMember.mockResolvedValue(false);
     mockUpdateFederatedOrganizationMemberRole.mockResolvedValue(false);
     mockEvaluateFeatureFlagStrict.mockResolvedValue(false);
+  });
+
+  describe("resending pending invitations", () => {
+    beforeEach(() => {
+      vi.mocked(isEmailConfigured).mockResolvedValue(true);
+      vi.mocked(sendEmail).mockResolvedValue(undefined);
+    });
+
+    function pendingInvite() {
+      mockExecute
+        .mockResolvedValueOnce({ rows: [] })
+        .mockResolvedValueOnce({
+          rows: [{ id: "invite-existing", role: "admin" }],
+        });
+    }
+
+    it("emails the existing invitation without changing its identity or role", async () => {
+      pendingInvite();
+
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "  INVITEE@example.test ",
+            role: "member",
+            resend: true,
+          }),
+        ),
+      ).resolves.toMatchObject({
+        id: "invite-existing",
+        email: "invitee@example.test",
+        role: "admin",
+        status: "pending",
+        emailSent: true,
+      });
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(mockExecute.mock.calls[1][0]).toMatchObject({
+        sql: expect.stringContaining(
+          "org_id = ? AND LOWER(email) = ? AND status = 'pending'",
+        ),
+        args: ["org-1", "invitee@example.test"],
+      });
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+      expect(sendEmail).toHaveBeenCalledWith(
+        expect.objectContaining({ to: "invitee@example.test", orgId: "org-1" }),
+      );
+    });
+
+    it("does not create or send an invitation absent from the current organization", async () => {
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "foreign@example.test",
+            resend: true,
+          }),
+        ),
+      ).rejects.toMatchObject({ statusCode: 404 });
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(mockExecute.mock.calls[1][0]).toMatchObject({
+        args: ["org-1", "foreign@example.test"],
+      });
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("rejects ordinary members before reading or sending an invitation", async () => {
+      mockGetOrgContext.mockResolvedValue({
+        email: "member@example.test",
+        orgId: "org-1",
+        orgName: "Example",
+        role: "member",
+      });
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "invitee@example.test",
+            resend: true,
+          }),
+        ),
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(mockExecute).not.toHaveBeenCalled();
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("reports unavailable email configuration without claiming a resend", async () => {
+      pendingInvite();
+      vi.mocked(isEmailConfigured).mockResolvedValue(false);
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "invitee@example.test",
+            resend: true,
+          }),
+        ),
+      ).rejects.toMatchObject({ statusCode: 503 });
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
+
+    it("reports provider rejection while leaving the existing invitation intact", async () => {
+      pendingInvite();
+      vi.mocked(sendEmail).mockRejectedValue(new Error("provider unavailable"));
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "invitee@example.test",
+            resend: true,
+          }),
+        ),
+      ).rejects.toMatchObject({ statusCode: 502 });
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(sendEmail).toHaveBeenCalledTimes(1);
+    });
+
+    it("continues to reject duplicate invitations without an explicit resend", async () => {
+      pendingInvite();
+      await expect(
+        createInvitationHandler(
+          makeEvent("/_agent-native/org/invitations", {
+            email: "invitee@example.test",
+          }),
+        ),
+      ).rejects.toMatchObject({ statusCode: 409 });
+      expect(mockExecute).toHaveBeenCalledTimes(2);
+      expect(sendEmail).not.toHaveBeenCalled();
+    });
   });
 
   it("keeps a federated removal atomic across the local and identity rosters", async () => {
