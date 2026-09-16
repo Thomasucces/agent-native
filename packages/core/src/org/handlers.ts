@@ -47,6 +47,10 @@ import { resolveVercelDeploymentProtectionHeaders } from "../server/credential-p
 import { renderInviteEmail } from "../server/email-templates.js";
 import { sendEmail, isEmailConfigured } from "../server/email.js";
 import { readBody } from "../server/h3-helpers.js";
+import {
+  getRequestContext,
+  runWithRequestContext,
+} from "../server/request-context.js";
 import { getOrgSetting, putOrgSetting } from "../settings/org-settings.js";
 import { isEmailDerivedName } from "../user-profile/shared.js";
 import { getUserProfiles } from "../user-profile/store.js";
@@ -678,62 +682,68 @@ export const createInvitationHandler = defineEventHandler(
       });
     }
 
-    const body = await readBody(event);
+    const orgId = ctx.orgId;
+    return runWithRequestContext(
+      { ...getRequestContext(), userEmail: ctx.email, orgId },
+      async () => {
+        const body = await readBody(event);
 
-    // Bulk shape: { invites: [{ email, role }, ...] } — preferred for any
-    // multi-recipient flow (paste-many, CSV upload). Single shape:
-    // { email, role } — kept for backwards compatibility.
-    const invitesInput: Array<{ email: string; role?: string }> | null =
-      Array.isArray(body?.invites)
-        ? body.invites.map((inv: any) => ({
-            email: String(inv?.email ?? ""),
-            role: inv?.role,
-          }))
-        : null;
+        // Bulk shape: { invites: [{ email, role }, ...] } — preferred for any
+        // multi-recipient flow (paste-many, CSV upload). Single shape:
+        // { email, role } — kept for backwards compatibility.
+        const invitesInput: Array<{ email: string; role?: string }> | null =
+          Array.isArray(body?.invites)
+            ? body.invites.map((inv: any) => ({
+                email: String(inv?.email ?? ""),
+                role: inv?.role,
+              }))
+            : null;
 
-    if (invitesInput) {
-      const succeeded: SingleInviteResult[] = [];
-      const failed: SingleInviteFailure[] = [];
-      const seen = new Set<string>();
+        if (invitesInput) {
+          const succeeded: SingleInviteResult[] = [];
+          const failed: SingleInviteFailure[] = [];
+          const seen = new Set<string>();
 
-      for (const inv of invitesInput) {
-        const lower = inv.email.trim().toLowerCase();
-        if (!lower) continue;
-        if (seen.has(lower)) continue;
-        seen.add(lower);
+          for (const inv of invitesInput) {
+            const lower = inv.email.trim().toLowerCase();
+            if (!lower) continue;
+            if (seen.has(lower)) continue;
+            seen.add(lower);
 
-        try {
-          const result = await inviteOne(
-            { orgId: ctx.orgId, orgName: ctx.orgName, email: ctx.email },
-            inv.email,
-            normalizeInviteRole(inv.role),
-            event,
-            body?.resend === true,
-          );
-          succeeded.push(result);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          failed.push({ email: lower, error: message });
+            try {
+              const result = await inviteOne(
+                { orgId, orgName: ctx.orgName, email: ctx.email },
+                inv.email,
+                normalizeInviteRole(inv.role),
+                event,
+                body?.resend === true,
+              );
+              succeeded.push(result);
+            } catch (err) {
+              const message = err instanceof Error ? err.message : String(err);
+              failed.push({ email: lower, error: message });
+            }
+          }
+
+          return {
+            succeeded,
+            failed,
+            total: succeeded.length + failed.length,
+          };
         }
-      }
 
-      return {
-        succeeded,
-        failed,
-        total: succeeded.length + failed.length,
-      };
-    }
-
-    // Single-invite shape.
-    const role = normalizeInviteRole(body?.role);
-    const result = await inviteOne(
-      { orgId: ctx.orgId, orgName: ctx.orgName, email: ctx.email },
-      body?.email ?? "",
-      role,
-      event,
-      body?.resend === true,
+        // Single-invite shape.
+        const role = normalizeInviteRole(body?.role);
+        const result = await inviteOne(
+          { orgId, orgName: ctx.orgName, email: ctx.email },
+          body?.email ?? "",
+          role,
+          event,
+          body?.resend === true,
+        );
+        return result;
+      },
     );
-    return result;
   },
 );
 

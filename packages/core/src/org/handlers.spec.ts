@@ -74,6 +74,12 @@ vi.mock("../settings/user-settings.js", () => ({
 }));
 
 import { isEmailConfigured, sendEmail } from "../server/email.js";
+import {
+  getRequestUserEmail,
+  getRequestOrgId,
+  getRequestContext,
+  runWithRequestContext,
+} from "../server/request-context.js";
 import { putUserSetting } from "../settings/user-settings.js";
 import {
   createInvitationHandler,
@@ -121,12 +127,36 @@ describe("org handlers", () => {
     });
 
     function pendingInvite() {
-      mockExecute
-        .mockResolvedValueOnce({ rows: [] })
-        .mockResolvedValueOnce({
-          rows: [{ id: "invite-existing", role: "admin" }],
-        });
+      mockExecute.mockResolvedValueOnce({ rows: [] }).mockResolvedValueOnce({
+        rows: [{ id: "invite-existing", role: "admin" }],
+      });
     }
+
+    it("resolves and sends email in the authenticated organization context", async () => {
+      pendingInvite();
+      vi.mocked(isEmailConfigured).mockImplementationOnce(async () => {
+        expect(getRequestUserEmail()).toBe("owner@example.test");
+        expect(getRequestOrgId()).toBe("org-1");
+        expect(getRequestContext()?.isSyntheticTraffic).toBe(true);
+        return true;
+      });
+      vi.mocked(sendEmail).mockImplementationOnce(async () => {
+        expect(getRequestUserEmail()).toBe("owner@example.test");
+        expect(getRequestOrgId()).toBe("org-1");
+      });
+      await runWithRequestContext({ isSyntheticTraffic: true }, async () => {
+        await expect(
+          createInvitationHandler(
+            makeEvent("/_agent-native/org/invitations", {
+              email: "invitee@example.test",
+              resend: true,
+            }),
+          ),
+        ).resolves.toMatchObject({ emailSent: true });
+        expect(getRequestContext()?.userEmail).toBeUndefined();
+        expect(getRequestContext()?.orgId).toBeUndefined();
+      });
+    });
 
     it("emails the existing invitation without changing its identity or role", async () => {
       pendingInvite();
