@@ -1,6 +1,10 @@
 import type { AgentChatTranslation } from "../core-messages.js";
 
 const messages: AgentChatTranslation = {
+  "org.resendInvitation": "초대 다시 보내기",
+  "org.invitationResent": "이메일 전송됨",
+  "org.invitationResendFailed":
+    "전송하지 못했습니다. 이메일 설정을 확인하고 다시 시도하세요.",
   "approval.alwaysAllow": "항상 허용",
   "approval.alwaysAllowHint":
     "이 명령과 정확히 일치하는 명령을 승인하고 항상 허용합니다",

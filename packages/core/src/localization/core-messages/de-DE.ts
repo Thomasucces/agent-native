@@ -1,6 +1,10 @@
 import type { AgentChatTranslation } from "../core-messages.js";
 
 const messages: AgentChatTranslation = {
+  "org.resendInvitation": "Einladung erneut senden",
+  "org.invitationResent": "E-Mail gesendet",
+  "org.invitationResendFailed":
+    "Senden fehlgeschlagen. E-Mail-Einstellungen prüfen und erneut versuchen.",
   "approval.alwaysAllow": "Immer erlauben",
   "approval.alwaysAllowHint":
     "Diesen exakten Befehl genehmigen und immer erlauben",

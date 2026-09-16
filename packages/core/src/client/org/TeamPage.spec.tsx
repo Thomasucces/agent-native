@@ -5,12 +5,19 @@ import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
+  resend: {
+    isPending: false,
+    isSuccess: false,
+    isError: false,
+    mutate: vi.fn(),
+  },
   action: { error: null, isPending: false, mutate: vi.fn() },
   changeRole: { error: null, isPending: false, mutate: vi.fn() },
   removeMember: { error: null, isPending: false, mutate: vi.fn() },
 }));
 
 vi.mock("./hooks.js", () => ({
+  useResendInvitation: () => mocks.resend,
   useAppRoles: () => ({ data: undefined }),
   useChangeMemberRole: () => mocks.changeRole,
   useRemoveMember: () => mocks.removeMember,
@@ -37,7 +44,7 @@ vi.mock("../i18n.js", () => ({
 }));
 
 import { TooltipProvider } from "../components/ui/tooltip.js";
-import { MemberRow, MembersTableCard } from "./TeamPage.js";
+import { MemberRow, MembersTableCard, PendingInviteRow } from "./TeamPage.js";
 
 describe("MemberRow organization controls", () => {
   let container: HTMLDivElement;
@@ -198,5 +205,68 @@ describe("MemberRow organization controls", () => {
 
     expect(container.textContent).toContain("No people found");
     expect(container.textContent).not.toContain("Invite members");
+  });
+});
+
+describe("PendingInviteRow resend", () => {
+  let container: HTMLDivElement;
+  let root: Root;
+  beforeEach(() => {
+    vi.stubGlobal("IS_REACT_ACT_ENVIRONMENT", true);
+    mocks.resend.isPending = false;
+    mocks.resend.isSuccess = false;
+    mocks.resend.isError = false;
+    mocks.resend.mutate.mockClear();
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = createRoot(container);
+  });
+  afterEach(() => {
+    act(() => root.unmount());
+    container.remove();
+    vi.unstubAllGlobals();
+  });
+  function render(canResend = true) {
+    act(() =>
+      root.render(
+        <PendingInviteRow
+          invite={{
+            id: "invite-1",
+            email: "member@example.test",
+            role: "member",
+          }}
+          canResend={canResend}
+        />,
+      ),
+    );
+  }
+  it("resends only the displayed invitation", () => {
+    render();
+    act(() => container.querySelector("button")!.click());
+    expect(mocks.resend.mutate).toHaveBeenCalledWith("member@example.test");
+  });
+  it("hides resend for ordinary members", () => {
+    render(false);
+    expect(container.querySelector("button")).toBeNull();
+  });
+  it("prevents repeat clicks while sending", () => {
+    mocks.resend.isPending = true;
+    render();
+    expect(container.querySelector("button")!.disabled).toBe(true);
+  });
+  it("shows success only after email was sent", () => {
+    mocks.resend.isSuccess = true;
+    render();
+    expect(container.textContent).toContain("org.invitationResent");
+    expect(container.querySelector("button")!.disabled).toBe(true);
+  });
+  it("shows a retryable error when sending fails", () => {
+    mocks.resend.isError = true;
+    render();
+    expect(container.querySelector('[role="alert"]')?.textContent).toBe(
+      "org.invitationResendFailed",
+    );
+    expect(container.textContent).not.toContain("org.invitationResent");
+    expect(container.querySelector("button")!.disabled).toBe(false);
   });
 });

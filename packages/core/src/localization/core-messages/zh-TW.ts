@@ -1,6 +1,9 @@
 import type { AgentChatTranslation } from "../core-messages.js";
 
 const messages: AgentChatTranslation = {
+  "org.resendInvitation": "重新傳送邀請",
+  "org.invitationResent": "郵件已傳送",
+  "org.invitationResendFailed": "傳送失敗。請檢查郵件設定後重試。",
   "approval.alwaysAllow": "一律允許",
   "approval.alwaysAllowHint": "核准並一律允許這個完全相同的命令",
   "approval.alwaysAllowAction": "一律允許此動作",
